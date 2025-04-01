@@ -14,7 +14,8 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,7 +38,7 @@ func NewScanner() *Scanner {
 }
 
 // ScanDevices scans directories for `uevent` files and creates a device tree.
-func (s *Scanner) ScanDevices() (err error, devices []*types.Device) {
+func (s *Scanner) ScanDevices() (devices []*types.Device, err error) {
 	devices = []*types.Device{}
 	devicesMap := map[string]*types.Device{}
 	err = filepath.Walk(s.devicesPath, func(path string, info os.FileInfo, err error) error {
@@ -56,7 +57,10 @@ func (s *Scanner) ScanDevices() (err error, devices []*types.Device) {
 			Parent:  nil,
 		}
 
-		s.readAttrs(filepath.Dir(path), device)
+		err = s.readAttrs(filepath.Dir(path), device)
+		if err != nil {
+			return err
+		}
 
 		err = s.readUeventFile(path, device)
 		if err != nil {
@@ -88,11 +92,11 @@ func (s *Scanner) ScanDevices() (err error, devices []*types.Device) {
 		devices = append(devices, v)
 	}
 
-	return err, devices
+	return devices, err
 }
 
 func (s *Scanner) readAttrs(path string, device *types.Device) error {
-	files, err := ioutil.ReadDir(path)
+	files, err := os.ReadDir(path)
 	if err != nil {
 		return err
 	}
@@ -102,7 +106,7 @@ func (s *Scanner) readAttrs(path string, device *types.Device) error {
 			continue
 		}
 
-		data, err := ioutil.ReadFile(filepath.Join(path, f.Name()))
+		data, err := os.ReadFile(filepath.Join(path, f.Name()))
 		if err != nil {
 			continue
 		}
@@ -119,9 +123,13 @@ func (s *Scanner) readUeventFile(path string, device *types.Device) error {
 		return err
 	}
 
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("cannot close uevent file", "error", err)
+		}
+	}()
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return err
 	}
@@ -160,9 +168,13 @@ func (s *Scanner) readDevFile(path string) (data string, err error) {
 		return
 	}
 
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("cannot close dev file", "error", err)
+		}
+	}()
 
-	d, err := ioutil.ReadAll(f)
+	d, err := io.ReadAll(f)
 	return strings.Trim(string(d), "\n\r\t "), err
 }
 
@@ -173,9 +185,13 @@ func (s *Scanner) readUdevInfo(devString string, d *types.Device) error {
 		return err
 	}
 
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("cannot close udev info file", "error", err)
+		}
+	}()
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return err
 	}

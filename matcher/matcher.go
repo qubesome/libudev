@@ -68,11 +68,7 @@ func (m *Matcher) matchDevice(device *types.Device) bool {
 		return false
 	}
 
-	def := false
-	if m.strategy == StrategyAnd {
-		def = true
-	}
-
+	def := (m.strategy == StrategyAnd)
 	for _, v := range m.rules {
 		if m.strategy == StrategyAnd && !v.Match(device) {
 			return false

@@ -20,10 +20,15 @@ func TestNewScanner(t *testing.T) {
 
 func TestScanDevices(t *testing.T) {
 	s := NewScanner()
-	Unzip("./assets/fixtures/demo_tree.zip", "./build/")
+
+	err := Unzip("./assets/fixtures/demo_tree.zip", "./build/")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	s.devicesPath = "./build/demo_tree/sys/devices"
 	s.udevDataPath = "./build/demo_tree/run/udev/data"
-	err, devices := s.ScanDevices()
+	devices, err := s.ScanDevices()
 	if err != nil {
 		t.Fatal("Error scan demo tree")
 	}
@@ -60,7 +65,7 @@ func TestScanDevicesIfNotSupported(t *testing.T) {
 	s := NewScanner()
 	s.devicesPath = "./NOT_EXIT_DIR"
 	s.udevDataPath = "./NOT_EXIT_DIR"
-	_, devices := s.ScanDevices()
+	devices, _ := s.ScanDevices()
 
 	if len(devices) != 0 {
 		t.Fatal("If the scan fails, then the device can not be found")
@@ -78,7 +83,10 @@ func Unzip(src, dest string) error {
 		}
 	}()
 
-	os.MkdirAll(dest, 0755)
+	err = os.MkdirAll(dest, 0755)
+	if err != nil {
+		return err
+	}
 
 	// Closure to address file descriptors issue with all the deferred .Close() methods
 	extractAndWriteFile := func(f *zip.File) error {
@@ -95,9 +103,16 @@ func Unzip(src, dest string) error {
 		path := filepath.Join(dest, f.Name)
 
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(path, f.Mode())
+			err = os.MkdirAll(path, f.Mode())
+			if err != nil {
+				return err
+			}
 		} else {
-			os.MkdirAll(filepath.Dir(path), f.Mode())
+			err = os.MkdirAll(filepath.Dir(path), f.Mode())
+			if err != nil {
+				return err
+			}
+
 			f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 			if err != nil {
 				return err
