@@ -5,12 +5,11 @@ Matcher allows you to add multiple filter rules by using the method `AddRule`
 and effectively filter the list of devices in a single pass.
 
 By default, Matcher uses the `AND` comparison strategy, but you can set the filtering strategy to` OR`.
-
 */
 package matcher
 
 import (
-	"github.com/citilinkru/libudev/types"
+	"github.com/qubesome/libudev/types"
 )
 
 const (

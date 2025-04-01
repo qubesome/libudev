@@ -2,11 +2,12 @@ package libudev
 
 import (
 	"archive/zip"
-	"github.com/citilinkru/libudev/matcher"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/qubesome/libudev/matcher"
 )
 
 func TestNewScanner(t *testing.T) {

@@ -1,16 +1,14 @@
 # libudev
 Golang native implementation Udev library
 
-[![Build Status](https://travis-ci.org/citilinkru/libudev.svg?branch=master)](https://travis-ci.org/citilinkru/libudev)
-[![Coverage Status](https://coveralls.io/repos/github/citilinkru/libudev/badge.svg?branch=master)](https://coveralls.io/github/citilinkru/libudev?branch=master)
-[![Go Report Card](https://goreportcard.com/badge/github.com/citilinkru/libudev)](https://goreportcard.com/report/github.com/citilinkru/libudev)
-[![GoDoc](https://godoc.org/github.com/citilinkru/libudev?status.svg)](https://godoc.org/github.com/citilinkru/libudev)
-[![GitHub release](https://img.shields.io/github/release/citilinkru/libudev.svg)](https://github.com/citilinkru/libudev/releases)
-
+[![Go Report Card](https://goreportcard.com/badge/github.com/qubesome/libudev)](https://goreportcard.com/report/github.com/qubesome/libudev)
+[![GoDoc](https://godoc.org/github.com/qubesome/libudev?status.svg)](https://godoc.org/github.com/qubesome/libudev)
+[![GitHub release](https://img.shields.io/github/release/qubesome/libudev.svg)](https://github.com/qubesome/libudev/releases)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/qubesome/libudev/badge)](https://scorecard.dev/viewer/?uri=github.com/qubesome/libudev)
 
 Installation
 ------------
-    go get github.com/citilinkru/libudev
+    go get github.com/qubesome/libudev
 
 Usage
 -----
@@ -49,29 +47,23 @@ Features
 * Without external dependencies
 * Code is covered by tests
 
-Requirements
-------------
-
-* Need at least `go1.13` or newer.
-
 Documentation
 -------------
 
-You can read package documentation [here](http:godoc.org/github.com/citilinkru/libudev) or read tests.
+You can read package documentation [here](http:godoc.org/github.com/qubesome/libudev) or read tests.
 
 Testing
 -------
 Unit-tests:
 ```bash
-go test -race -v ./...
+make test
 ```
 
 Contributing
 ------------
 * Fork
 * Write code
-* Run unit test: `go test -v ./...`
-* Run go vet: `go vet -v ./...`
-* Run go fmt: `go fmt ./...`
+* Run unit test: `make test`
+* Run format checks: `make verify`
 * Commit changes
 * Create pull-request

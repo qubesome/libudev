@@ -14,11 +14,12 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/citilinkru/libudev/types"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/qubesome/libudev/types"
 )
 
 // Scanner structure of the device scanner.
