@@ -1,9 +1,7 @@
 # libudev
 Golang native implementation Udev library
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/qubesome/libudev)](https://goreportcard.com/report/github.com/qubesome/libudev)
 [![GoDoc](https://godoc.org/github.com/qubesome/libudev?status.svg)](https://godoc.org/github.com/qubesome/libudev)
-[![GitHub release](https://img.shields.io/github/release/qubesome/libudev.svg)](https://github.com/qubesome/libudev/releases)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/qubesome/libudev/badge)](https://scorecard.dev/viewer/?uri=github.com/qubesome/libudev)
 
 Installation
