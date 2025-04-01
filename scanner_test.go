@@ -20,9 +20,9 @@ func TestNewScanner(t *testing.T) {
 
 func TestScanDevices(t *testing.T) {
 	s := NewScanner()
-	Unzip("./assets/fixtures/demo_tree.zip", "/tmp/demo_tree/")
-	s.devicesPath = "/tmp/demo_tree/demo_tree/sys/devices"
-	s.udevDataPath = "/tmp/demo_tree/demo_tree/run/udev/data"
+	Unzip("./assets/fixtures/demo_tree.zip", "./build/")
+	s.devicesPath = "./build/demo_tree/sys/devices"
+	s.udevDataPath = "./build/demo_tree/run/udev/data"
 	err, devices := s.ScanDevices()
 	if err != nil {
 		t.Fatal("Error scan demo tree")
