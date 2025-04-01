@@ -1,3 +1,3 @@
-module github.com/citilinkru/libudev
+module github.com/qubesome/libudev
 
-go 1.14
+go 1.24

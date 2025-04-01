@@ -1,8 +1,9 @@
 package matcher
 
 import (
-	"github.com/citilinkru/libudev/types"
 	"regexp"
+
+	"github.com/qubesome/libudev/types"
 )
 
 // RuleAttr structure of the filtering rule by attributes.

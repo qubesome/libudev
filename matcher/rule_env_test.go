@@ -1,8 +1,9 @@
 package matcher
 
 import (
-	"github.com/citilinkru/libudev/types"
 	"testing"
+
+	"github.com/qubesome/libudev/types"
 )
 
 func TestNewRuleEnv(t *testing.T) {
