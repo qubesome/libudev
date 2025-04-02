@@ -10,6 +10,7 @@ package libudev
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -19,6 +20,10 @@ import (
 	"strings"
 
 	"github.com/qubesome/libudev/types"
+)
+
+const (
+	maxDevSize = 128 * 1024 // 128KB
 )
 
 // Scanner represents a device scanner.
@@ -34,6 +39,7 @@ func NewScanner(opts ...Option) (*scanner, error) {
 	}
 
 	if s.opts.devicesRoot == nil {
+		// ref: https://www.kernel.org/doc/Documentation/filesystems/sysfs.txt
 		r, err := os.OpenRoot("/sys/devices")
 		if err != nil {
 			return nil, err
@@ -111,12 +117,34 @@ func (s *scanner) ScanDevices() ([]*types.Device, error) {
 	return devices, err
 }
 
-func (s *scanner) readAttrs(path string, device *types.Device) error {
-	files, err := fs.ReadDir(s.opts.devicesRoot.FS(), path)
+func (s *scanner) getDevice(path string) (*types.Device, error) {
+	attrs, err := s.readAttrs(filepath.Dir(path))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	device := &types.Device{
+		Devpath: filepath.Dir(path),
+		Env:     map[string]string{},
+		Attrs:   attrs,
+		Parent:  nil,
+	}
+
+	err = s.readUeventFile(path, device)
+	if err != nil {
+		return nil, err
+	}
+
+	return device, nil
+}
+
+func (s *scanner) readAttrs(path string) (map[string]string, error) {
+	files, err := fs.ReadDir(s.opts.devicesRoot.FS(), path)
+	if err != nil {
+		return nil, err
+	}
+
+	attrs := map[string]string{}
 	for _, f := range files {
 		if f.IsDir() || f.Name() == "uevent" || f.Name() == "descriptors" {
 			continue
@@ -127,13 +155,22 @@ func (s *scanner) readAttrs(path string, device *types.Device) error {
 			continue
 		}
 
-		device.Attrs[f.Name()] = strings.Trim(string(data), "\n\r\t ")
+		attrs[f.Name()] = strings.Trim(string(data), "\n\r\t ")
 	}
 
-	return nil
+	return attrs, nil
 }
 
 func (s *scanner) readUeventFile(path string, device *types.Device) error {
+	_, err := s.opts.devicesRoot.Stat(path)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+
+		return nil
+	}
+
 	f, err := s.opts.devicesRoot.Open(path)
 	if err != nil {
 		return err
@@ -146,17 +183,17 @@ func (s *scanner) readUeventFile(path string, device *types.Device) error {
 	}()
 
 	buf := bufio.NewScanner(f)
-
-	var line string
 	for buf.Scan() {
-		line = buf.Text()
-		field := strings.SplitN(line, "=", 2)
-		if len(field) != 2 {
+		k, v, ok := strings.Cut(buf.Text(), "=")
+		if !ok {
 			continue
 		}
 
-		device.Env[field[0]] = field[1]
-
+		device.Env[k] = v
+	}
+	err = buf.Err()
+	if err != nil {
+		return err
 	}
 
 	devPath := filepath.Join(filepath.Dir(path), "dev")
@@ -173,10 +210,19 @@ func (s *scanner) readUeventFile(path string, device *types.Device) error {
 	return nil
 }
 
-func (s *scanner) readDevFile(path string) (data string, err error) {
+func (s *scanner) readDevFile(path string) (string, error) {
+	_, err := s.opts.devicesRoot.Stat(path)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+
+		return "", nil
+	}
+
 	f, err := s.opts.devicesRoot.Open(path)
 	if err != nil {
-		return
+		return "", err
 	}
 
 	defer func() {
@@ -185,12 +231,22 @@ func (s *scanner) readDevFile(path string) (data string, err error) {
 		}
 	}()
 
-	d, err := io.ReadAll(f)
+	d, err := io.ReadAll(io.LimitReader(f, maxDevSize))
 	return strings.Trim(string(d), "\n\r\t "), err
 }
 
 func (s *scanner) readUdevInfo(devString string, d *types.Device) error {
+	// The c prefix here defines a character device.
 	path := fmt.Sprintf("c%s", devString)
+	_, err := s.opts.udevDataRoot.Stat(path)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+
+		return nil
+	}
+
 	f, err := s.opts.udevDataRoot.Open(path)
 	if err != nil {
 		return err
@@ -203,33 +259,35 @@ func (s *scanner) readUdevInfo(devString string, d *types.Device) error {
 	}()
 
 	buf := bufio.NewScanner(f)
-
-	var line string
 	for buf.Scan() {
-		line = buf.Text()
-		groups := strings.SplitN(line, ":", 2)
-		if len(groups) != 2 {
+		k, v, ok := strings.Cut(buf.Text(), ":")
+		if !ok {
 			continue
 		}
 
-		if groups[0] == "I" {
-			d.UsecInitialized = groups[1]
+		if k == "I" {
+			d.UsecInitialized = v
 			continue
 		}
 
-		if groups[0] == "G" {
-			d.Tags = append(d.Tags, groups[1])
+		if k == "G" {
+			d.Tags = append(d.Tags, v)
 			continue
 		}
 
-		if groups[0] == "E" {
-			fields := strings.SplitN(groups[1], "=", 2)
-			if len(fields) != 2 {
+		if k == "E" {
+			ck, cv, ok := strings.Cut(v, "=")
+			if !ok {
 				continue
 			}
 
-			d.Env[fields[0]] = fields[1]
+			d.Env[ck] = cv
 		}
+	}
+
+	err = buf.Err()
+	if err != nil {
+		return err
 	}
 
 	return nil
