@@ -1,20 +1,18 @@
-/*
-Package libudev implements a native udev library.
-
-Recursively passes `/sys/devices/...` directory and reads `uevent` files (placed in `Env`).
-Based on the information received from `uevent` files, it tries to enrich the data based
-on the data received from the files that are on the same level as the `uevent` file (they are placed in `Attrs`),
-and also tries to find and read the files `/run/udev/data/...` (placed in `Env` or `Tags`).
-
-After building a list of devices, the library builds a device tree.
-*/
+// Package libudev implements a native udev library.
+//
+// Recursively parses devices in `/sys/devices/...` and reads `uevent` files (placed in `Env`).
+// Based on the information received from `uevent` files, it tries to enrich the data based
+// on the data received from the files that are on the same level as the `uevent` file (they are placed in `Attrs`),
+// and also tries to find and read the files `/run/udev/data/...` (placed in `Env` or `Tags`).
+//
+// After building a list of devices, the library builds a device tree.
 package libudev
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -23,30 +21,48 @@ import (
 	"github.com/qubesome/libudev/types"
 )
 
-// Scanner structure of the device scanner.
-type Scanner struct {
-	devicesPath  string
-	udevDataPath string
+// Scanner represents a device scanner.
+type scanner struct {
+	opts *options
 }
 
-// NewScanner creates a new instance of device scanner.
-func NewScanner() *Scanner {
-	return &Scanner{
-		devicesPath:  "/sys/devices",
-		udevDataPath: "/run/udev/data",
+// NewScanner creates a new instance of the device scanner.
+func NewScanner(opts ...Option) (*scanner, error) {
+	s := &scanner{opts: &options{}}
+	for _, opt := range opts {
+		opt(s)
 	}
+
+	if s.opts.devicesRoot == nil {
+		r, err := os.OpenRoot("/sys/devices")
+		if err != nil {
+			return nil, err
+		}
+
+		s.opts.devicesRoot = r
+	}
+	if s.opts.udevDataRoot == nil {
+		r, err := os.OpenRoot("/run/udev/data")
+		if err != nil {
+			return nil, err
+		}
+		s.opts.udevDataRoot = r
+	}
+
+	return s, nil
 }
 
 // ScanDevices scans directories for `uevent` files and creates a device tree.
-func (s *Scanner) ScanDevices() (devices []*types.Device, err error) {
-	devices = []*types.Device{}
+func (s *scanner) ScanDevices() ([]*types.Device, error) {
+	devices := []*types.Device{}
 	devicesMap := map[string]*types.Device{}
-	err = filepath.Walk(s.devicesPath, func(path string, info os.FileInfo, err error) error {
+
+	err := fs.WalkDir(s.opts.devicesRoot.FS(), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 
-		if info.IsDir() || info.Name() != "uevent" {
+		if d.IsDir() || d.Name() != "uevent" {
 			return nil
 		}
 
@@ -70,6 +86,9 @@ func (s *Scanner) ScanDevices() (devices []*types.Device, err error) {
 		devicesMap[device.Devpath] = device
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	// make tree
 	for _, v := range devicesMap {
@@ -78,9 +97,6 @@ func (s *Scanner) ScanDevices() (devices []*types.Device, err error) {
 		devpath := v.Devpath
 		for i := len(parts) - 1; i >= 0; i-- {
 			devpath = strings.TrimSuffix(devpath, "/"+parts[i])
-			if devpath == s.devicesPath {
-				break
-			}
 
 			if device, ok := devicesMap[devpath]; ok {
 				v.Parent = device
@@ -95,8 +111,8 @@ func (s *Scanner) ScanDevices() (devices []*types.Device, err error) {
 	return devices, err
 }
 
-func (s *Scanner) readAttrs(path string, device *types.Device) error {
-	files, err := os.ReadDir(path)
+func (s *scanner) readAttrs(path string, device *types.Device) error {
+	files, err := fs.ReadDir(s.opts.devicesRoot.FS(), path)
 	if err != nil {
 		return err
 	}
@@ -106,7 +122,7 @@ func (s *Scanner) readAttrs(path string, device *types.Device) error {
 			continue
 		}
 
-		data, err := os.ReadFile(filepath.Join(path, f.Name()))
+		data, err := fs.ReadFile(s.opts.devicesRoot.FS(), filepath.Join(path, f.Name()))
 		if err != nil {
 			continue
 		}
@@ -117,8 +133,8 @@ func (s *Scanner) readAttrs(path string, device *types.Device) error {
 	return nil
 }
 
-func (s *Scanner) readUeventFile(path string, device *types.Device) error {
-	f, err := os.Open(path)
+func (s *scanner) readUeventFile(path string, device *types.Device) error {
+	f, err := s.opts.devicesRoot.Open(path)
 	if err != nil {
 		return err
 	}
@@ -129,12 +145,7 @@ func (s *Scanner) readUeventFile(path string, device *types.Device) error {
 		}
 	}()
 
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return err
-	}
-
-	buf := bufio.NewScanner(bytes.NewBuffer(data))
+	buf := bufio.NewScanner(f)
 
 	var line string
 	for buf.Scan() {
@@ -162,8 +173,8 @@ func (s *Scanner) readUeventFile(path string, device *types.Device) error {
 	return nil
 }
 
-func (s *Scanner) readDevFile(path string) (data string, err error) {
-	f, err := os.Open(path)
+func (s *scanner) readDevFile(path string) (data string, err error) {
+	f, err := s.opts.devicesRoot.Open(path)
 	if err != nil {
 		return
 	}
@@ -178,9 +189,9 @@ func (s *Scanner) readDevFile(path string) (data string, err error) {
 	return strings.Trim(string(d), "\n\r\t "), err
 }
 
-func (s *Scanner) readUdevInfo(devString string, d *types.Device) error {
-	path := fmt.Sprintf("%s/c%s", s.udevDataPath, devString)
-	f, err := os.Open(path)
+func (s *scanner) readUdevInfo(devString string, d *types.Device) error {
+	path := fmt.Sprintf("c%s", devString)
+	f, err := s.opts.udevDataRoot.Open(path)
 	if err != nil {
 		return err
 	}
@@ -191,12 +202,7 @@ func (s *Scanner) readUdevInfo(devString string, d *types.Device) error {
 		}
 	}()
 
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return err
-	}
-
-	buf := bufio.NewScanner(bytes.NewBuffer(data))
+	buf := bufio.NewScanner(f)
 
 	var line string
 	for buf.Scan() {
