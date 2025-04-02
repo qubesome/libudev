@@ -44,19 +44,19 @@ func TestMatchDefault(t *testing.T) {
 	m := NewMatcher()
 	m.AddRule(NewRuleDevpath("devpaht-1"))
 	m.AddRule(NewRuleDevpath("devpaht-2"))
-	if len(m.Match(devices)) != 0 {
+	if len(m.Matches(devices)) != 0 {
 		t.Fatal("Devices was found incorrectly")
 	}
 
 	m2 := NewMatcher()
 	m2.AddRule(NewRuleDevpath("devpaht-.+"))
 	m2.AddRule(NewRuleDevpath("devpaht-[0-9]+"))
-	if len(m2.Match(devices)) != 2 {
+	if len(m2.Matches(devices)) != 2 {
 		t.Fatal("Not found two devices")
 	}
 
 	m3 := NewMatcher()
-	if len(m3.Match(devices)) != 0 {
+	if len(m3.Matches(devices)) != 0 {
 		t.Fatal("Empty rules Matcher finded not 0 devices")
 	}
 }
@@ -68,7 +68,7 @@ func TestMatchAnd(t *testing.T) {
 	m.SetStrategy(StrategyAnd)
 	m.AddRule(NewRuleDevpath("devpaht-1"))
 	m.AddRule(NewRuleDevpath("devpaht-2"))
-	if len(m.Match(devices)) != 0 {
+	if len(m.Matches(devices)) != 0 {
 		t.Fatal("Devices was found incorrectly")
 	}
 
@@ -76,7 +76,7 @@ func TestMatchAnd(t *testing.T) {
 	m2.SetStrategy(StrategyAnd)
 	m2.AddRule(NewRuleDevpath("devpaht-.+"))
 	m2.AddRule(NewRuleDevpath("devpaht-[0-9]+"))
-	if len(m2.Match(devices)) != 2 {
+	if len(m2.Matches(devices)) != 2 {
 		t.Fatal("Not found two devices")
 	}
 
@@ -84,18 +84,18 @@ func TestMatchAnd(t *testing.T) {
 	m2.AddRule(NewRuleEnv("ENV-2", "[0-9]+"))
 	m2.AddRule(NewRuleAttr("ATTR-1", "[a-z]+"))
 	m2.AddRule(NewRuleAttr("ATTR-2", "[0-9]+"))
-	if len(m2.Match(devices)) != 2 {
+	if len(m2.Matches(devices)) != 2 {
 		t.Fatal("Not found two devices")
 	}
 
 	m2.AddRule(NewRuleAttr("ATTR-2", "123"))
-	if len(m.Match(devices)) != 0 {
+	if len(m.Matches(devices)) != 0 {
 		t.Fatal("Devices was found incorrectly")
 	}
 
 	m3 := NewMatcher()
 	m3.SetStrategy(StrategyAnd)
-	if len(m3.Match(devices)) != 0 {
+	if len(m3.Matches(devices)) != 0 {
 		t.Fatal("Empty rules Matcher finded not 0 devices")
 	}
 }
@@ -107,12 +107,12 @@ func TestMatchOr(t *testing.T) {
 	m.SetStrategy(StrategyOr)
 	m.AddRule(NewRuleDevpath("devpaht-1"))
 	m.AddRule(NewRuleDevpath("devpaht-3"))
-	if len(m.Match(devices)) != 1 {
+	if len(m.Matches(devices)) != 1 {
 		t.Fatal("Not found one device")
 	}
 
 	m.AddRule(NewRuleDevpath("devpaht-2"))
-	if len(m.Match(devices)) != 2 {
+	if len(m.Matches(devices)) != 2 {
 		t.Fatal("Not found two devices")
 	}
 
@@ -123,13 +123,13 @@ func TestMatchOr(t *testing.T) {
 	m2.AddRule(NewRuleEnv("ENV-2", "NOT_FOUND"))
 	m2.AddRule(NewRuleAttr("ATTR-1", "ghi456jkl"))
 	m2.AddRule(NewRuleAttr("ATTR-2", "NOT_FOUND"))
-	if len(m2.Match(devices)) != 2 {
+	if len(m2.Matches(devices)) != 2 {
 		t.Fatal("Not found two devices")
 	}
 
 	m3 := NewMatcher()
 	m3.SetStrategy(StrategyOr)
-	if len(m3.Match(devices)) != 0 {
+	if len(m3.Matches(devices)) != 0 {
 		t.Fatal("Empty rules Matcher finded not 0 devices")
 	}
 }

@@ -52,7 +52,7 @@ func TestScanDevices(t *testing.T) {
 
 	m := matcher.NewMatcher()
 	m.AddRule(matcher.NewRuleAttr("dev", "189:133"))
-	dFiltered := m.Match(devices)
+	dFiltered := m.Matches(devices)
 	if len(dFiltered) != 1 {
 		t.Fatal("Not found device by Attr `dev` = `189:133`")
 	}

@@ -1,11 +1,9 @@
-/*
-Package matcher implements a service for filtering devices.
-
-Matcher allows you to add multiple filter rules by using the method `AddRule`
-and effectively filter the list of devices in a single pass.
-
-By default, Matcher uses the `AND` comparison strategy, but you can set the filtering strategy to` OR`.
-*/
+// Package matcher implements a mechanism for filtering devices.
+//
+// Matcher allows you to add multiple filter rules by using the method `AddRule`
+// and effectively filter the list of devices in a single pass.
+//
+// By default, Matcher uses the `AND` comparison strategy, but you can set the filtering strategy to` OR`.
 package matcher
 
 import (
@@ -50,7 +48,17 @@ func (m *Matcher) AddRule(rule Rule) {
 	m.rules = append(m.rules, rule)
 }
 
-func (m *Matcher) Match(devices []*types.Device) []*types.Device {
+func (m *Matcher) Match(devices ...*types.Device) bool {
+	for _, v := range devices {
+		if m.matchDevice(v) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (m *Matcher) Matches(devices []*types.Device) []*types.Device {
 	var ret []*types.Device
 	for _, v := range devices {
 		if !m.matchDevice(v) {
