@@ -1,20 +1,19 @@
-/*
-Package libudev implements a native udev library.
-
-Recursively passes `/sys/devices/...` directory and reads `uevent` files (placed in `Env`).
-Based on the information received from `uevent` files, it tries to enrich the data based
-on the data received from the files that are on the same level as the `uevent` file (they are placed in `Attrs`),
-and also tries to find and read the files `/run/udev/data/...` (placed in `Env` or `Tags`).
-
-After building a list of devices, the library builds a device tree.
-*/
+// Package libudev implements a native udev library.
+//
+// Recursively parses devices in `/sys/devices/...` and reads `uevent` files (placed in `Env`).
+// Based on the information received from `uevent` files, it tries to enrich the data based
+// on the data received from the files that are on the same level as the `uevent` file (they are placed in `Attrs`),
+// and also tries to find and read the files `/run/udev/data/...` (placed in `Env` or `Tags`).
+//
+// After building a list of devices, the library builds a device tree.
 package libudev
 
 import (
 	"bufio"
-	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -23,53 +22,78 @@ import (
 	"github.com/qubesome/libudev/types"
 )
 
-// Scanner structure of the device scanner.
-type Scanner struct {
-	devicesPath  string
-	udevDataPath string
+const (
+	maxDevSize = 128 * 1024 // 128KB
+)
+
+// Scanner represents a device scanner.
+type scanner struct {
+	opts *options
 }
 
-// NewScanner creates a new instance of device scanner.
-func NewScanner() *Scanner {
-	return &Scanner{
-		devicesPath:  "/sys/devices",
-		udevDataPath: "/run/udev/data",
+// NewScanner creates a new instance of the device scanner.
+func NewScanner(opts ...Option) (*scanner, error) {
+	s := &scanner{opts: &options{}}
+	for _, opt := range opts {
+		opt(s)
 	}
+
+	if s.opts.devicesRoot == nil {
+		// ref: https://www.kernel.org/doc/Documentation/filesystems/sysfs.txt
+		r, err := os.OpenRoot("/sys/devices")
+		if err != nil {
+			return nil, err
+		}
+
+		s.opts.devicesRoot = r
+	}
+	if s.opts.udevDataRoot == nil {
+		r, err := os.OpenRoot("/run/udev/data")
+		if err != nil {
+			return nil, err
+		}
+		s.opts.udevDataRoot = r
+	}
+
+	return s, nil
 }
 
 // ScanDevices scans directories for `uevent` files and creates a device tree.
-func (s *Scanner) ScanDevices() (devices []*types.Device, err error) {
-	devices = []*types.Device{}
+func (s *scanner) ScanDevices() ([]*types.Device, error) {
+	devices := []*types.Device{}
 	devicesMap := map[string]*types.Device{}
-	err = filepath.Walk(s.devicesPath, func(path string, info os.FileInfo, err error) error {
+
+	err := fs.WalkDir(s.opts.devicesRoot.FS(), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 
-		if info.IsDir() || info.Name() != "uevent" {
+		if s.opts.pathFilterPattern != nil {
+			if !s.opts.pathFilterPattern.MatchString(path) {
+				return nil
+			}
+		}
+
+		if d.IsDir() || d.Name() != "uevent" {
 			return nil
 		}
 
-		device := &types.Device{
-			Devpath: filepath.Dir(path),
-			Env:     map[string]string{},
-			Attrs:   map[string]string{},
-			Parent:  nil,
+		device, err := s.getDevice(path)
+		if err != nil {
+			slog.Debug("failed to get device", "path", path, "error", err)
+			return nil
 		}
 
-		err = s.readAttrs(filepath.Dir(path), device)
-		if err != nil {
-			return err
-		}
-
-		err = s.readUeventFile(path, device)
-		if err != nil {
+		if device == nil {
 			return nil
 		}
 
 		devicesMap[device.Devpath] = device
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	// make tree
 	for _, v := range devicesMap {
@@ -78,11 +102,18 @@ func (s *Scanner) ScanDevices() (devices []*types.Device, err error) {
 		devpath := v.Devpath
 		for i := len(parts) - 1; i >= 0; i-- {
 			devpath = strings.TrimSuffix(devpath, "/"+parts[i])
-			if devpath == s.devicesPath {
-				break
-			}
 
 			if device, ok := devicesMap[devpath]; ok {
+				// vendor and product IDs may be set at child or
+				// parent levels. If a child doesn't have one, get
+				// it from the parent.
+				if v.VendorID == "" {
+					v.VendorID = device.VendorID
+				}
+				if v.ProductID == "" {
+					v.ProductID = device.ProductID
+				}
+
 				v.Parent = device
 				device.Children = append(device.Children, v)
 				break
@@ -92,13 +123,70 @@ func (s *Scanner) ScanDevices() (devices []*types.Device, err error) {
 		devices = append(devices, v)
 	}
 
+	if s.opts.matcher != nil {
+		return s.opts.matcher.Matches(devices), nil
+	}
+
 	return devices, err
 }
 
-func (s *Scanner) readAttrs(path string, device *types.Device) error {
-	files, err := os.ReadDir(path)
+func (s *scanner) getDevice(path string) (*types.Device, error) {
+	attrs, err := s.readAttrs(filepath.Dir(path))
 	if err != nil {
-		return err
+		return nil, err
+	}
+
+	device := &types.Device{
+		Devpath: filepath.Dir(path),
+		Env:     map[string]string{},
+		Attrs:   attrs,
+		Parent:  nil,
+	}
+
+	if id, ok := s.readId(filepath.Join(filepath.Dir(path), "idVendor")); ok {
+		device.VendorID = id
+	}
+	if id, ok := s.readId(filepath.Join(filepath.Dir(path), "idProduct")); ok {
+		device.ProductID = id
+	}
+
+	err = s.readUeventFile(path, device)
+	if err != nil {
+		return nil, err
+	}
+
+	return device, nil
+}
+
+func (s *scanner) readId(path string) (string, bool) {
+	_, err := s.opts.devicesRoot.Stat(path)
+	if err != nil {
+		return "", false
+	}
+
+	f, err := s.opts.devicesRoot.Open(path)
+	if err != nil {
+		return "", false
+	}
+
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("cannot close ID file", "error", err)
+		}
+	}()
+
+	d, err := io.ReadAll(io.LimitReader(f, maxDevSize))
+	if err != nil {
+		return "", false
+	}
+	return strings.Trim(string(d), "\n\r\t "), true
+}
+
+func (s *scanner) readAttrs(path string) (map[string]string, error) {
+	attrs := map[string]string{}
+	files, err := fs.ReadDir(s.opts.devicesRoot.FS(), path)
+	if err != nil {
+		return attrs, err
 	}
 
 	for _, f := range files {
@@ -106,19 +194,28 @@ func (s *Scanner) readAttrs(path string, device *types.Device) error {
 			continue
 		}
 
-		data, err := os.ReadFile(filepath.Join(path, f.Name()))
+		data, err := fs.ReadFile(s.opts.devicesRoot.FS(), filepath.Join(path, f.Name()))
 		if err != nil {
 			continue
 		}
 
-		device.Attrs[f.Name()] = strings.Trim(string(data), "\n\r\t ")
+		attrs[f.Name()] = strings.Trim(string(data), "\n\r\t ")
 	}
 
-	return nil
+	return attrs, nil
 }
 
-func (s *Scanner) readUeventFile(path string, device *types.Device) error {
-	f, err := os.Open(path)
+func (s *scanner) readUeventFile(path string, device *types.Device) error {
+	_, err := s.opts.devicesRoot.Stat(path)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+
+		return nil
+	}
+
+	f, err := s.opts.devicesRoot.Open(path)
 	if err != nil {
 		return err
 	}
@@ -129,23 +226,18 @@ func (s *Scanner) readUeventFile(path string, device *types.Device) error {
 		}
 	}()
 
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return err
-	}
-
-	buf := bufio.NewScanner(bytes.NewBuffer(data))
-
-	var line string
+	buf := bufio.NewScanner(f)
 	for buf.Scan() {
-		line = buf.Text()
-		field := strings.SplitN(line, "=", 2)
-		if len(field) != 2 {
+		k, v, ok := strings.Cut(buf.Text(), "=")
+		if !ok {
 			continue
 		}
 
-		device.Env[field[0]] = field[1]
-
+		device.Env[k] = v
+	}
+	err = buf.Err()
+	if err != nil {
+		return err
 	}
 
 	devPath := filepath.Join(filepath.Dir(path), "dev")
@@ -162,10 +254,19 @@ func (s *Scanner) readUeventFile(path string, device *types.Device) error {
 	return nil
 }
 
-func (s *Scanner) readDevFile(path string) (data string, err error) {
-	f, err := os.Open(path)
+func (s *scanner) readDevFile(path string) (string, error) {
+	_, err := s.opts.devicesRoot.Stat(path)
 	if err != nil {
-		return
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+
+		return "", nil
+	}
+
+	f, err := s.opts.devicesRoot.Open(path)
+	if err != nil {
+		return "", err
 	}
 
 	defer func() {
@@ -174,13 +275,23 @@ func (s *Scanner) readDevFile(path string) (data string, err error) {
 		}
 	}()
 
-	d, err := io.ReadAll(f)
+	d, err := io.ReadAll(io.LimitReader(f, maxDevSize))
 	return strings.Trim(string(d), "\n\r\t "), err
 }
 
-func (s *Scanner) readUdevInfo(devString string, d *types.Device) error {
-	path := fmt.Sprintf("%s/c%s", s.udevDataPath, devString)
-	f, err := os.Open(path)
+func (s *scanner) readUdevInfo(devString string, d *types.Device) error {
+	// The c prefix here defines a character device.
+	path := fmt.Sprintf("c%s", devString)
+	_, err := s.opts.udevDataRoot.Stat(path)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+
+		return nil
+	}
+
+	f, err := s.opts.udevDataRoot.Open(path)
 	if err != nil {
 		return err
 	}
@@ -191,39 +302,36 @@ func (s *Scanner) readUdevInfo(devString string, d *types.Device) error {
 		}
 	}()
 
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return err
-	}
-
-	buf := bufio.NewScanner(bytes.NewBuffer(data))
-
-	var line string
+	buf := bufio.NewScanner(f)
 	for buf.Scan() {
-		line = buf.Text()
-		groups := strings.SplitN(line, ":", 2)
-		if len(groups) != 2 {
+		k, v, ok := strings.Cut(buf.Text(), ":")
+		if !ok {
 			continue
 		}
 
-		if groups[0] == "I" {
-			d.UsecInitialized = groups[1]
+		if k == "I" {
+			d.UsecInitialized = v
 			continue
 		}
 
-		if groups[0] == "G" {
-			d.Tags = append(d.Tags, groups[1])
+		if k == "G" {
+			d.Tags = append(d.Tags, v)
 			continue
 		}
 
-		if groups[0] == "E" {
-			fields := strings.SplitN(groups[1], "=", 2)
-			if len(fields) != 2 {
+		if k == "E" {
+			ck, cv, ok := strings.Cut(v, "=")
+			if !ok {
 				continue
 			}
 
-			d.Env[fields[0]] = fields[1]
+			d.Env[ck] = cv
 		}
+	}
+
+	err = buf.Err()
+	if err != nil {
+		return err
 	}
 
 	return nil

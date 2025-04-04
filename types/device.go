@@ -9,6 +9,9 @@ type Device struct {
 	Tags            []string
 	UsecInitialized string
 
+	VendorID  string
+	ProductID string
+
 	Parent   *Device
 	Children []*Device
 }

@@ -11,35 +11,48 @@ import (
 )
 
 func TestNewScanner(t *testing.T) {
-	s := NewScanner()
-	_, ok := interface{}(s).(*Scanner)
+	s, _ := NewScanner()
+	_, ok := interface{}(s).(*scanner)
 	if !ok {
 		t.Fatal("Structure does not equal Scanner")
 	}
 }
 
 func TestScanDevices(t *testing.T) {
-	s := NewScanner()
-
-	err := Unzip("./assets/fixtures/demo_tree.zip", "./build/")
+	dir := t.TempDir()
+	err := unzip("./assets/fixtures/demo_tree.zip", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	s.devicesPath = "./build/demo_tree/sys/devices"
-	s.udevDataPath = "./build/demo_tree/run/udev/data"
+	devRoot, err := os.OpenRoot(filepath.Join(dir, "demo_tree/sys/devices"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	udevDataRoot, err := os.OpenRoot(filepath.Join(dir, "demo_tree/run/udev/data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewScanner(WithDevicesRoot(devRoot),
+		WithUDevDataRoot(udevDataRoot))
+	if err != nil {
+		t.Fatal("failed to create scanner", err)
+	}
+
 	devices, err := s.ScanDevices()
 	if err != nil {
-		t.Fatal("Error scan demo tree")
+		t.Fatal("failed to scan the demo tree", err)
 	}
 
 	if len(devices) != 11 {
-		t.Fatal("Scanned devices count not equal 11")
+		t.Fatalf("wanted 11 devices got %d", len(devices))
 	}
 
 	m := matcher.NewMatcher()
 	m.AddRule(matcher.NewRuleAttr("dev", "189:133"))
-	dFiltered := m.Match(devices)
+	dFiltered := m.Matches(devices)
 	if len(dFiltered) != 1 {
 		t.Fatal("Not found device by Attr `dev` = `189:133`")
 	}
@@ -61,18 +74,34 @@ func TestScanDevices(t *testing.T) {
 	}
 }
 
-func TestScanDevicesIfNotSupported(t *testing.T) {
-	s := NewScanner()
-	s.devicesPath = "./NOT_EXIT_DIR"
-	s.udevDataPath = "./NOT_EXIT_DIR"
-	devices, _ := s.ScanDevices()
+func TestScanDevicesNotFound(t *testing.T) {
+	devRoot, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	udevDataRoot, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewScanner(WithDevicesRoot(devRoot),
+		WithUDevDataRoot(udevDataRoot))
+	if err != nil {
+		t.Fatal("failed to create scanner", err)
+	}
+
+	devices, err := s.ScanDevices()
 	if len(devices) != 0 {
-		t.Fatal("If the scan fails, then the device can not be found")
+		t.Fatalf("wanted 0 devices but got %d", len(devices))
+	}
+
+	if err != nil {
+		t.Fatalf("failed to scan empty dirs: %v", err)
 	}
 }
 
-func Unzip(src, dest string) error {
+func unzip(src, dest string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
 		return err
@@ -83,7 +112,7 @@ func Unzip(src, dest string) error {
 		}
 	}()
 
-	err = os.MkdirAll(dest, 0755)
+	err = os.MkdirAll(dest, 0o700)
 	if err != nil {
 		return err
 	}
@@ -139,4 +168,53 @@ func Unzip(src, dest string) error {
 	}
 
 	return nil
+}
+
+func TestScanDevicesWithMatcher(t *testing.T) {
+	dir := t.TempDir()
+	err := unzip("./assets/fixtures/demo_tree.zip", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	devRoot, err := os.OpenRoot(filepath.Join(dir, "demo_tree/sys/devices"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	udevDataRoot, err := os.OpenRoot(filepath.Join(dir, "demo_tree/run/udev/data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := matcher.NewMatcher()
+	m.AddRule(matcher.NewRuleEnv("ID_MODEL_ENC", "USB\\\\x20Optical\\\\x20Mouse"))
+
+	s, err := NewScanner(WithDevicesRoot(devRoot),
+		WithUDevDataRoot(udevDataRoot),
+		WithMatcher(m))
+	if err != nil {
+		t.Fatal("failed to create scanner", err)
+	}
+
+	devices, err := s.ScanDevices()
+	if err != nil {
+		t.Fatal("failed to scan the demo tree", err)
+	}
+
+	if len(devices) != 3 {
+		t.Fatalf("wanted 3 devices got %d", len(devices))
+	}
+
+	for _, dev := range devices {
+		if dev.Env["ID_MODEL"] != "USB_Optical_Mouse" {
+			t.Errorf("want ID_MODEL %s got %v", "USB_Optical_Mouse", dev.Env["ID_MODEL"])
+		}
+		if dev.VendorID != "046d" {
+			t.Errorf("want VendorID %s got %v", "046d", dev.VendorID)
+		}
+		if dev.ProductID != "c05b" {
+			t.Errorf("want ProductID %s got %v", "c05b", dev.ProductID)
+		}
+	}
 }
