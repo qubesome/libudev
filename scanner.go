@@ -104,6 +104,16 @@ func (s *scanner) ScanDevices() ([]*types.Device, error) {
 			devpath = strings.TrimSuffix(devpath, "/"+parts[i])
 
 			if device, ok := devicesMap[devpath]; ok {
+				// vendor and product IDs may be set at child or
+				// parent levels. If a child doesn't have one, get
+				// it from the parent.
+				if v.VendorID == "" {
+					v.VendorID = device.VendorID
+				}
+				if v.ProductID == "" {
+					v.ProductID = device.ProductID
+				}
+
 				v.Parent = device
 				device.Children = append(device.Children, v)
 				break
@@ -133,12 +143,43 @@ func (s *scanner) getDevice(path string) (*types.Device, error) {
 		Parent:  nil,
 	}
 
+	if id, ok := s.readId(filepath.Join(filepath.Dir(path), "idVendor")); ok {
+		device.VendorID = id
+	}
+	if id, ok := s.readId(filepath.Join(filepath.Dir(path), "idProduct")); ok {
+		device.ProductID = id
+	}
+
 	err = s.readUeventFile(path, device)
 	if err != nil {
 		return nil, err
 	}
 
 	return device, nil
+}
+
+func (s *scanner) readId(path string) (string, bool) {
+	_, err := s.opts.devicesRoot.Stat(path)
+	if err != nil {
+		return "", false
+	}
+
+	f, err := s.opts.devicesRoot.Open(path)
+	if err != nil {
+		return "", false
+	}
+
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("cannot close ID file", "error", err)
+		}
+	}()
+
+	d, err := io.ReadAll(io.LimitReader(f, maxDevSize))
+	if err != nil {
+		return "", false
+	}
+	return strings.Trim(string(d), "\n\r\t "), true
 }
 
 func (s *scanner) readAttrs(path string) (map[string]string, error) {

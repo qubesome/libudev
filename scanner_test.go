@@ -210,5 +210,11 @@ func TestScanDevicesWithMatcher(t *testing.T) {
 		if dev.Env["ID_MODEL"] != "USB_Optical_Mouse" {
 			t.Errorf("want ID_MODEL %s got %v", "USB_Optical_Mouse", dev.Env["ID_MODEL"])
 		}
+		if dev.VendorID != "046d" {
+			t.Errorf("want VendorID %s got %v", "046d", dev.VendorID)
+		}
+		if dev.ProductID != "c05b" {
+			t.Errorf("want ProductID %s got %v", "c05b", dev.ProductID)
+		}
 	}
 }
