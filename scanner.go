@@ -68,24 +68,23 @@ func (s *scanner) ScanDevices() ([]*types.Device, error) {
 			return nil
 		}
 
+		if s.opts.pathFilterPattern != nil {
+			if !s.opts.pathFilterPattern.MatchString(path) {
+				return nil
+			}
+		}
+
 		if d.IsDir() || d.Name() != "uevent" {
 			return nil
 		}
 
-		device := &types.Device{
-			Devpath: filepath.Dir(path),
-			Env:     map[string]string{},
-			Attrs:   map[string]string{},
-			Parent:  nil,
+		device, err := s.getDevice(path)
+		if err != nil {
+			slog.Debug("failed to get device", "path", path, "error", err)
+			return nil
 		}
 
-		err = s.readAttrs(filepath.Dir(path), device)
-		if err != nil {
-			return err
-		}
-
-		err = s.readUeventFile(path, device)
-		if err != nil {
+		if device == nil {
 			return nil
 		}
 
@@ -114,6 +113,10 @@ func (s *scanner) ScanDevices() ([]*types.Device, error) {
 		devices = append(devices, v)
 	}
 
+	if s.opts.matcher != nil {
+		return s.opts.matcher.Matches(devices), nil
+	}
+
 	return devices, err
 }
 
@@ -139,12 +142,12 @@ func (s *scanner) getDevice(path string) (*types.Device, error) {
 }
 
 func (s *scanner) readAttrs(path string) (map[string]string, error) {
+	attrs := map[string]string{}
 	files, err := fs.ReadDir(s.opts.devicesRoot.FS(), path)
 	if err != nil {
-		return nil, err
+		return attrs, err
 	}
 
-	attrs := map[string]string{}
 	for _, f := range files {
 		if f.IsDir() || f.Name() == "uevent" || f.Name() == "descriptors" {
 			continue

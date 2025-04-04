@@ -169,3 +169,46 @@ func unzip(src, dest string) error {
 
 	return nil
 }
+
+func TestScanDevicesWithMatcher(t *testing.T) {
+	dir := t.TempDir()
+	err := unzip("./assets/fixtures/demo_tree.zip", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	devRoot, err := os.OpenRoot(filepath.Join(dir, "demo_tree/sys/devices"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	udevDataRoot, err := os.OpenRoot(filepath.Join(dir, "demo_tree/run/udev/data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := matcher.NewMatcher()
+	m.AddRule(matcher.NewRuleEnv("ID_MODEL_ENC", "USB\\\\x20Optical\\\\x20Mouse"))
+
+	s, err := NewScanner(WithDevicesRoot(devRoot),
+		WithUDevDataRoot(udevDataRoot),
+		WithMatcher(m))
+	if err != nil {
+		t.Fatal("failed to create scanner", err)
+	}
+
+	devices, err := s.ScanDevices()
+	if err != nil {
+		t.Fatal("failed to scan the demo tree", err)
+	}
+
+	if len(devices) != 3 {
+		t.Fatalf("wanted 3 devices got %d", len(devices))
+	}
+
+	for _, dev := range devices {
+		if dev.Env["ID_MODEL"] != "USB_Optical_Mouse" {
+			t.Errorf("want ID_MODEL %s got %v", "USB_Optical_Mouse", dev.Env["ID_MODEL"])
+		}
+	}
+}
